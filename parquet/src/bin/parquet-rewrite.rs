@@ -1,3 +1,5 @@
+// TODO: ParquetV2???
+//TODO: set_sorting_columns
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -39,9 +41,9 @@ use arrow_array::RecordBatchReader;
 use clap::{builder::PossibleValue, Parser, ValueEnum};
 use parquet::{
     arrow::{arrow_reader::ParquetRecordBatchReaderBuilder, ArrowWriter},
-    basic::Compression,
+    basic::{Compression, Encoding},
     file::{
-        properties::{EnabledStatistics, WriterProperties, WriterVersion},
+        properties::{BloomFilterPosition, EnabledStatistics, WriterProperties, WriterVersion},
         reader::FileReader,
         serialized_reader::SerializedFileReader,
     },
@@ -85,6 +87,37 @@ impl From<CompressionArgs> for Compression {
             CompressionArgs::Lz4 => Self::LZ4,
             CompressionArgs::Zstd => Self::ZSTD(Default::default()),
             CompressionArgs::Lz4Raw => Self::LZ4_RAW,
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
+#[allow(non_camel_case_types)]
+enum EncodingArgs {
+    PLAIN,
+    PLAIN_DICTIONARY,
+    RLE,
+    BIT_PACKED,
+    DELTA_BINARY_PACKED,
+    DELTA_LENGTH_BYTE_ARRAY,
+    DELTA_BYTE_ARRAY,
+    RLE_DICTIONARY,
+    BYTE_STREAM_SPLIT,
+}
+
+#[allow(deprecated)]
+impl From<EncodingArgs> for Encoding {
+    fn from(value: EncodingArgs) -> Self {
+        match value {
+            EncodingArgs::PLAIN => Self::PLAIN,
+            EncodingArgs::PLAIN_DICTIONARY => Self::PLAIN_DICTIONARY,
+            EncodingArgs::RLE => Self::RLE,
+            EncodingArgs::BIT_PACKED => Self::BIT_PACKED,
+            EncodingArgs::DELTA_BINARY_PACKED => Self::DELTA_BINARY_PACKED,
+            EncodingArgs::DELTA_LENGTH_BYTE_ARRAY => Self::DELTA_LENGTH_BYTE_ARRAY,
+            EncodingArgs::DELTA_BYTE_ARRAY => Self::DELTA_BYTE_ARRAY,
+            EncodingArgs::RLE_DICTIONARY => Self::RLE_DICTIONARY,
+            EncodingArgs::BYTE_STREAM_SPLIT => Self::BYTE_STREAM_SPLIT,
         }
     }
 }
@@ -153,6 +186,10 @@ struct Args {
     /// Compression used.
     #[clap(long, value_enum)]
     compression: Option<CompressionArgs>,
+
+    /// Encoding used.
+    #[clap(long, value_enum)]
+    encoding: Option<EncodingArgs>,
 
     /// Sets maximum number of rows in a row group.
     #[clap(long)]
@@ -230,6 +267,12 @@ fn main() {
     if let Some(value) = args.compression {
         writer_properties_builder = writer_properties_builder.set_compression(value.into());
     }
+
+    if let Some(value) = args.encoding {
+        writer_properties_builder = writer_properties_builder.set_encoding(value.into());
+    }
+    // TODO: encoding different column diffently
+
     if let Some(value) = args.max_row_group_size {
         writer_properties_builder = writer_properties_builder.set_max_row_group_size(value);
     }
@@ -257,6 +300,14 @@ fn main() {
                 writer_properties_builder = writer_properties_builder.set_bloom_filter_ndv(value);
             }
         }
+
+        
+        // For reader locality: let BF at end.
+        writer_properties_builder =
+            writer_properties_builder.set_bloom_filter_position(BloomFilterPosition::End);
+
+
+
     }
     if let Some(value) = args.dictionary_enabled {
         writer_properties_builder = writer_properties_builder.set_dictionary_enabled(value);
